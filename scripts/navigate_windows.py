@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hypr_ipc import (  # noqa: E402
-    batch_async,
+    batch_wait,
     focus_window,
     hyprctl_json,
     move_focus,
@@ -150,7 +150,7 @@ def pan_to_window(floating, target, monitor):
         )
         for window in floating
     ]
-    batch_async(expressions)
+    batch_wait(expressions)
     focus_window(target["address"])
 
 
@@ -168,7 +168,7 @@ def center_window(floating, target, monitor):
         )
         for window in floating
     ]
-    batch_async(expressions)
+    batch_wait(expressions)
     focus_window(target["address"])
 
 
