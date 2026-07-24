@@ -10,6 +10,8 @@ configuration. In addition to Sarod's original canvas it provides:
   maximize instead of allowing overlap.
 - Directional edge resizing in 10%-of-output steps, with separate grow and
   shrink operations.
+- Directional focus pans by the minimum amount needed to reveal the target;
+  a separate center action recenters the focused window.
 - Runtime-directory state, serialized movement, current Hyprland IPC, and
   multi-device modifier tracking suitable for a supervised systemd service.
 
