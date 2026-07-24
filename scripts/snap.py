@@ -6,7 +6,7 @@ import subprocess
 import threading
 import time
 
-from hypr_ipc import batch_async, move_window_exact_lua
+from hypr_ipc import batch_async, batch_wait, move_window_exact_lua
 
 
 def _hypr_json(*arguments, timeout=0.5):
@@ -74,8 +74,9 @@ class SnapManager:
             target_x, target_y = self._snap_target(address, clients)
             current = _geometry(moving)
             if target_x != current["x"] or target_y != current["y"]:
-                batch_async([move_window_exact_lua(target_x, target_y, address)])
-        except Exception:
+                batch_wait([move_window_exact_lua(target_x, target_y, address)])
+        except Exception as error:
+            print(f"Snap update failed for {address}: {error}", flush=True)
             return
 
     def end_drag(self, address):
@@ -87,7 +88,8 @@ class SnapManager:
                 self.last_geometry = {
                     key: _geometry(value) for key, value in clients.items()
                 }
-        except Exception:
+        except Exception as error:
+            print(f"Snap relation update failed for {address}: {error}", flush=True)
             with self.lock:
                 self.dragged_address = None
 
