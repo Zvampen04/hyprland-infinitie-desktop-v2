@@ -94,7 +94,11 @@ class SnapManager:
     def _refresh_gap(self):
         try:
             option = _hypr_json("getoption", "general:gaps_in")
-            self.gap = max(0, int(option.get("int", 8)))
+            custom = str(option.get("custom", "")).split()
+            value = option.get("int")
+            if value is None and custom:
+                value = custom[0]
+            self.gap = max(0, int(value if value is not None else 8))
         except Exception:
             self.gap = 8
         self.threshold = max(24, self.gap * 2 + 8)

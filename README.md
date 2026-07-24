@@ -8,6 +8,8 @@ configuration. In addition to Sarod's original canvas it provides:
 - Edge and corner snapping using Hyprland's configured inner gap.
 - A persistent snap graph that pushes connected windows during resize and
   maximize instead of allowing overlap.
+- Directional edge resizing in 10%-of-output steps, with separate grow and
+  shrink operations.
 - Runtime-directory state, serialized movement, current Hyprland IPC, and
   multi-device modifier tracking suitable for a supervised systemd service.
 
@@ -114,17 +116,21 @@ Add the following lines to your ~/.config/hypr/hyprland.lua:
    hl.bind(mainMod .. " + SHIFT + up",    hl.dsp.exec_cmd("python3 ~/scripts/move_window.py up"),    { repeating = true })
    hl.bind(mainMod .. " + SHIFT + down",  hl.dsp.exec_cmd("python3 ~/scripts/move_window.py down"),  { repeating = true })
 
-   hl.bind(mainMod .. " + CTRL + left",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py left"),  {    repeating = true })
-   hl.bind(mainMod .. " + CTRL + right", hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py right"), { repeating = true })
-   hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py up"),    { repeating = true })
-   hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py down"),  { repeating = true })
+   hl.bind(mainMod .. " + CTRL + left",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py left grow"),  { repeating = true })
+   hl.bind(mainMod .. " + CTRL + right", hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py right grow"), { repeating = true })
+   hl.bind(mainMod .. " + CTRL + up",    hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py up grow"),    { repeating = true })
+   hl.bind(mainMod .. " + CTRL + down",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py down grow"),  { repeating = true })
+   hl.bind(mainMod .. " + CTRL + SHIFT + left",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py left shrink"),  { repeating = true })
+   hl.bind(mainMod .. " + CTRL + SHIFT + right", hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py right shrink"), { repeating = true })
+   hl.bind(mainMod .. " + CTRL + SHIFT + up",    hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py up shrink"),    { repeating = true })
+   hl.bind(mainMod .. " + CTRL + SHIFT + down",  hl.dsp.exec_cmd("python3 ~/scripts/resize_window.py down shrink"),  { repeating = true })
    ```
 
 ## 🖱️ How to use
 
  **Workspaces:** Press ***SUPER + Z or X*** to change of workspaces.
  
- **Panning:** Hold ***SUPER + ALT*** and move your mouse to slide the entire desktop.
+ **Panning:** Hold ***SUPER*** and left-drag empty background to slide the entire desktop.
  
  **Navigation:** Press ***SUPER + Arrow Keys*** to center and focus the next floating/tiled window.
  
@@ -132,7 +138,8 @@ Add the following lines to your ~/.config/hypr/hyprland.lua:
 
  **Toggle floating/layout:** Press ***SUPER + V*** ti toggle one window flotating/mosaic.
 
- **Rezize window:** Press/hold ***CTRL + SUPER + Arrow Keys*** to rezize windows.
+ **Resize window:** Press/hold ***CTRL + SUPER + Arrow Keys*** to grow the
+ requested edge by 10% of the output, or add ***SHIFT*** to shrink it.
 
  **Move windows:** Press/hold ***SHIFT + SUPER + Arrow Keys*** to move windows on floating.
 
