@@ -7,12 +7,13 @@ Si toca el borde del monitor, empuja las demás ventanas en sentido contrario.
 Uso: python3 move_window.py <left|right|up|down>
 """
 
+import fcntl
 import subprocess
 import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import hyprctl_json, move_window_exact_lua, batch_async, dispatch
+from hypr_ipc import (batch_wait, hyprctl_json, move_window_exact_lua, move_window_exact_wait)
 
 STEP = 90
 
@@ -92,7 +93,7 @@ def main():
     if hitting_edge:
         # Mover la ventana exactamente hasta el borde
         if actual_dx != 0 or actual_dy != 0:
-            dispatch(move_window_exact_lua(wx + actual_dx, wy + actual_dy, addr))
+            move_window_exact_wait(wx + actual_dx, wy + actual_dy, addr)
         # Empujar las demás con el paso completo en sentido contrario
         others = [w for w in get_floating_windows(workspace_id) if w["address"] != addr]
         exprs = []
@@ -100,11 +101,18 @@ def main():
             ox = w["at"][0] - dx
             oy = w["at"][1] - dy
             exprs.append(move_window_exact_lua(ox, oy, w["address"]))
-        batch_async(exprs)
+        batch_wait(exprs)
     else:
         # Sin borde: mover solo la ventana activa el paso completo
-        dispatch(move_window_exact_lua(new_x, new_y, addr))
+        move_window_exact_wait(new_x, new_y, addr)
 
 
 if __name__ == "__main__":
-    main()
+    runtime_dir = os.environ.get("INFINITE_DESKTOP_RUNTIME_DIR",
+                                 os.path.join(os.environ["XDG_RUNTIME_DIR"],
+                                              "hyprland-infinite-desktop"))
+    os.makedirs(runtime_dir, mode=0o700, exist_ok=True)
+    with open(os.path.join(runtime_dir, "keyboard-move.lock"), "w",
+              encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        main()

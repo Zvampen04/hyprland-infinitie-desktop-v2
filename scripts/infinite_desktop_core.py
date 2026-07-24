@@ -5,7 +5,8 @@ import math
 from evdev import InputDevice, list_devices, ecodes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hypr_ipc import move_window_exact_lua, batch_async
+from hypr_ipc import move_window_exact_lua, move_window_exact, batch_async
+from snap import SnapManager
 
 #ruta deseada /home/usuario/scripts/
 
@@ -24,18 +25,21 @@ KEY_LEFT=105; KEY_RIGHT=106
 KEY_UP=103; KEY_DOWN=108
 BTN_LEFT=272
 
-STATE_FILE = "/tmp/infinite-desktop-state"
-PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome', 
-                  'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi', 
-                  'opera', 'microsoft-edge']
+RUNTIME_DIR = os.environ.get("INFINITE_DESKTOP_RUNTIME_DIR",
+                             os.path.join(os.environ["XDG_RUNTIME_DIR"], "hyprland-infinite-desktop"))
+os.makedirs(RUNTIME_DIR, mode=0o700, exist_ok=True)
+STATE_FILE = os.path.join(RUNTIME_DIR, "state")
 
 lock = threading.Lock()
 super_pressed=False; alt_pressed=False; ctrl_pressed=False; btn_left=False
+modifier_devices = {"super": set(), "alt": set(), "ctrl": set()}
 acc_x=0.0; acc_y=0.0
-frame_held_hidden=False  # último estado notificado a quickshell (evita spam de llamadas ipc)
+canvas_drag_active=False
 
 # Variables para arrastre de ventanas
 window_drag_active = False
+dragged_window_addr = None
+snap_manager = SnapManager()
 last_window_pos = None
 last_window_bounds = None
 mouse_rel_x = 0
@@ -50,19 +54,6 @@ def read_inverted():
             return f.read().strip() == 'inverse'
     except:
         return False
-
-def notify_quickshell_hold(state):
-    """Avisa a quickshell (IpcHandler target='frame') que esconda/muestre
-    el marco. No bloqueante: se lanza en su propio hilo para no meter
-    latencia en el loop de lectura de teclado. Silenciosa si quickshell
-    no está corriendo (p.ej. durante un reload)."""
-    try:
-        subprocess.run(
-            ['qs', 'ipc', 'call', 'frame', 'setHeldHidden', 'true' if state else 'false'],
-            capture_output=True, timeout=1.0
-        )
-    except Exception:
-        pass
 
 def get_monitor_bounds():
     try:
@@ -111,11 +102,41 @@ def get_focused_window():
     except:
         return None
 
-def is_protected_app(window):
-    if not window:
+
+def pointer_is_on_workspace_background():
+    """Return true when the pointer is not over a client on this workspace."""
+    try:
+        cursor = subprocess.run(
+            ['hyprctl', 'cursorpos', '-j'],
+            capture_output=True, text=True, timeout=1.0, check=True
+        )
+        clients_result = subprocess.run(
+            ['hyprctl', 'clients', '-j'],
+            capture_output=True, text=True, timeout=1.0, check=True
+        )
+        workspace_result = subprocess.run(
+            ['hyprctl', 'activeworkspace', '-j'],
+            capture_output=True, text=True, timeout=1.0, check=True
+        )
+        position = json.loads(cursor.stdout)
+        clients = json.loads(clients_result.stdout)
+        workspace_id = json.loads(workspace_result.stdout)['id']
+        pointer_x, pointer_y = position['x'], position['y']
+        for window in clients:
+            if window.get('workspace', {}).get('id') != workspace_id:
+                continue
+            if window.get('hidden') or not window.get('mapped', True):
+                continue
+            x, y = window.get('at', [0, 0])
+            width, height = window.get('size', [0, 0])
+            if x <= pointer_x < x + width and y <= pointer_y < y + height:
+                return False
+        return True
+    except Exception as error:
+        # A failed hit test must never turn a window drag into a canvas drag.
+        print(f"Background hit test failed: {error}", flush=True)
         return False
-    window_class = window.get('class', '').lower()
-    return any(app in window_class for app in PROTECTED_APPS)
+
 
 def get_window_center(window):
     return (window['at'][0] + window['size'][0] // 2,
@@ -172,14 +193,12 @@ def get_monitor_center():
 
 def monitor_window_drag():
     """Monitorea si se esta arrastrando una ventana y aplica empuje en bordes"""
-    global window_drag_active, last_window_bounds, mouse_rel_x, mouse_rel_y
-    
-    dragged_window_addr = None
+    global window_drag_active, dragged_window_addr, last_window_bounds, mouse_rel_x, mouse_rel_y
     
     while True:
         try:
             with lock:
-                is_dragging = super_pressed and btn_left and not alt_pressed and not ctrl_pressed
+                is_dragging = (super_pressed and btn_left and not alt_pressed and not ctrl_pressed and not canvas_drag_active)
                 mouse_dx = mouse_rel_x
                 mouse_dy = mouse_rel_y
                 mouse_rel_x = 0
@@ -191,8 +210,10 @@ def monitor_window_drag():
                     dragged_window_addr = focused['address']
                     window_drag_active = True
                     last_window_bounds = get_window_bounds(focused)
+                    snap_manager.begin_drag(dragged_window_addr)
             
             elif not is_dragging and window_drag_active:
+                snap_manager.end_drag(dragged_window_addr)
                 window_drag_active = False
                 dragged_window_addr = None
                 last_window_bounds = None
@@ -201,6 +222,7 @@ def monitor_window_drag():
                 window = get_focused_window()
                 if window and window.get('address') == dragged_window_addr:
                     current_bounds = get_window_bounds(window)
+                    snap_manager.update_drag(dragged_window_addr)
                     monitor = get_monitor_bounds()
                     MARGIN = 10
                     
@@ -232,6 +254,7 @@ def monitor_window_drag():
                     
                     last_window_bounds = current_bounds
                 else:
+                    snap_manager.end_drag(dragged_window_addr)
                     window_drag_active = False
                     dragged_window_addr = None
             
@@ -283,8 +306,7 @@ def move_active_window(direction):
         hitting_edge = (dx < 0 and hits_left) or (dx > 0 and hits_right) or                        (dy < 0 and hits_top)  or (dy > 0 and hits_bottom)
 
         # Mover la ventana activa
-        subprocess.run(['hyprctl', 'dispatch', move_window_exact_lua(new_x, new_y, addr)],
-                       capture_output=True, timeout=0.2)
+        move_window_exact(new_x, new_y, addr, timeout=0.2)
 
         # Si toca borde, empujar las demas en sentido contrario
         if hitting_edge:
@@ -336,9 +358,10 @@ def scan_devices():
     return keyboards, mice
 
 
+
 def kbd_reader_device(path):
-    """Lee eventos de UN teclado especifico. Se lanza un hilo por cada teclado detectado."""
-    global super_pressed, alt_pressed, ctrl_pressed, frame_held_hidden
+    """Read one keyboard and clear only its modifier state on disconnect."""
+    global super_pressed, alt_pressed, ctrl_pressed
     try:
         fd = open(path, 'rb')
     except Exception:
@@ -352,41 +375,42 @@ def kbd_reader_device(path):
         if not data or len(data) < EVENT_SIZE:
             break
         _, _, etype, code, value = struct.unpack('llHHi', data)
-        if etype != EV_KEY:
-            continue
-        if value == 2:
+        if etype != EV_KEY or value == 2:
             continue
 
-        notify_state = None
         with lock:
             if code in (KEY_LEFTMETA, KEY_RIGHTMETA):
-                super_pressed = (value == 1)
+                devices = modifier_devices["super"]
             elif code in (KEY_LEFTALT, KEY_RIGHTALT):
-                alt_pressed = (value == 1)
+                devices = modifier_devices["alt"]
             elif code in (KEY_LEFTCTRL, KEY_RIGHTCTRL):
-                ctrl_pressed = (value == 1)
-
-            combo = super_pressed and alt_pressed
-            if combo != frame_held_hidden:
-                frame_held_hidden = combo
-                notify_state = combo
-
-        # La llamada IPC (subprocess) se hace FUERA del lock y en su
-        # propio hilo: qs ipc call puede tardar unos ms y no queremos
-        # bloquear la lectura de eventos ni a otros hilos de teclado
-        # esperando el mismo lock.
-        if notify_state is not None:
-            threading.Thread(target=notify_quickshell_hold, args=(notify_state,), daemon=True).start()
+                devices = modifier_devices["ctrl"]
+            else:
+                continue
+            if value == 1:
+                devices.add(path)
+            else:
+                devices.discard(path)
+            super_pressed = bool(modifier_devices["super"])
+            alt_pressed = bool(modifier_devices["alt"])
+            ctrl_pressed = bool(modifier_devices["ctrl"])
 
     try:
         fd.close()
     except Exception:
         pass
+    with lock:
+        for devices in modifier_devices.values():
+            devices.discard(path)
+        super_pressed = bool(modifier_devices["super"])
+        alt_pressed = bool(modifier_devices["alt"])
+        ctrl_pressed = bool(modifier_devices["ctrl"])
+
 
 
 def mouse_reader_device(path):
-    """Lee eventos de UN mouse especifico. Se lanza un hilo por cada mouse detectado."""
-    global acc_x, acc_y, btn_left, mouse_rel_x, mouse_rel_y
+    """Read one mouse and pan only a Super-drag started on empty background."""
+    global acc_x, acc_y, btn_left, mouse_rel_x, mouse_rel_y, canvas_drag_active
     try:
         fd = open(path, 'rb')
     except Exception:
@@ -401,29 +425,51 @@ def mouse_reader_device(path):
             break
         _, _, etype, code, value = struct.unpack('llHHi', data)
 
-        with lock:
-            if etype == EV_KEY and code == BTN_LEFT:
-                btn_left = (value == 1)
-            elif etype == EV_REL:
-                if code == REL_X:
-                    mouse_rel_x += value
-                elif code == REL_Y:
-                    mouse_rel_y += value
-
-                if super_pressed and alt_pressed:
-                    sign = -1 if read_inverted() else 1
-                    if code == REL_X:
-                        acc_x += value * speed * sign
-                    elif code == REL_Y:
-                        acc_y += value * speed * sign
-                else:
+        if etype == EV_KEY and code == BTN_LEFT:
+            if value == 1:
+                with lock:
+                    can_start = super_pressed and not alt_pressed and not ctrl_pressed
+                starts_on_background = can_start and pointer_is_on_workspace_background()
+                with lock:
+                    btn_left = True
+                    canvas_drag_active = starts_on_background
                     acc_x = 0.0
                     acc_y = 0.0
+            elif value == 0:
+                with lock:
+                    btn_left = False
+                    canvas_drag_active = False
+                    acc_x = 0.0
+                    acc_y = 0.0
+            continue
+
+        if etype != EV_REL:
+            continue
+        with lock:
+            if code == REL_X:
+                mouse_rel_x += value
+            elif code == REL_Y:
+                mouse_rel_y += value
+
+            if canvas_drag_active and super_pressed and btn_left:
+                sign = -1 if read_inverted() else 1
+                if code == REL_X:
+                    acc_x += value * speed * sign
+                elif code == REL_Y:
+                    acc_y += value * speed * sign
+            else:
+                acc_x = 0.0
+                acc_y = 0.0
 
     try:
         fd.close()
     except Exception:
         pass
+    with lock:
+        btn_left = False
+        canvas_drag_active = False
+        acc_x = 0.0
+        acc_y = 0.0
 
 
 _active_kbd_threads = {}
@@ -476,11 +522,12 @@ try:
 except:
     pass
 
+snap_manager.start()
 threading.Thread(target=device_manager, daemon=True).start()
 threading.Thread(target=monitor_window_drag, daemon=True).start()
 print("Infinite Desktop activo (deteccion automatica de dispositivos)", flush=True)
-print("Super+click: Arrastrar ventana (al tocar borde, el raton mueve el resto)", flush=True)
-print("Super+Alt+mouse: Arrastrar todo el escritorio", flush=True)
+print("Super+drag window: Mover ventana (los bordes empujan el lienzo)", flush=True)
+print("Super+drag background: Arrastrar todo el escritorio", flush=True)
 print("Super+flechas: Navegacion via hyprland bind", flush=True)
 print("Super+Shift+flechas: Mover ventana activa via hyprland bind", flush=True)
 
@@ -508,7 +555,7 @@ while True:
     time.sleep(0.016)
 
     with lock:
-        active_drag = super_pressed and alt_pressed
+        active_drag = canvas_drag_active and super_pressed and btn_left
         dx = acc_x
         dy = acc_y
         acc_x = 0.0

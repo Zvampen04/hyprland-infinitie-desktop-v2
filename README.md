@@ -1,4 +1,16 @@
 # hyprland-infinite-desktop-v2
+
+This is the Zvampen04-maintained fork used by the dendritic NixOS
+configuration. In addition to Sarod's original canvas it provides:
+
+- Super-drag on empty background to pan the entire canvas.
+- Cursor-centred zoom helpers for wheel and keyboard bindings.
+- Edge and corner snapping using Hyprland's configured inner gap.
+- A persistent snap graph that pushes connected windows during resize and
+  maximize instead of allowing overlap.
+- Runtime-directory state, serialized movement, current Hyprland IPC, and
+  multi-device modifier tracking suitable for a supervised systemd service.
+
 A powerful script to transform your Hyprland workspace into an "infinite" canvas. This tool allows you to pan all floating windows simultaneously using your mouse and navigate between them with keyboard shortcuts, creating a dynamic and boundless desktop experience.
 <img width="1920" height="1080" alt="20260509_18h26m44s_grim" src="https://github.com/user-attachments/assets/464fa371-7cc4-4fd5-a06c-55d7b51ba59d" />
 
@@ -125,4 +137,3 @@ Add the following lines to your ~/.config/hypr/hyprland.lua:
  **Move windows:** Press/hold ***SHIFT + SUPER + Arrow Keys*** to move windows on floating.
 
  **Move tiled windows:** Press ***SUPER + ALT + Arrow Keys*** yo move tiled windows.
-

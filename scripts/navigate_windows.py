@@ -17,10 +17,6 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hypr_ipc import hyprctl_json, move_focus, move_window_exact_lua, focus_window, batch_async
 
-PROTECTED_APPS = ['brave-browser', 'chromium', 'chromium-browser', 'google-chrome',
-                  'firefox', 'firefoxdeveloperedition', 'librewolf', 'vivaldi',
-                  'opera', 'microsoft-edge']
-
 DIR_SHORT = {"left": "l", "right": "r", "up": "u", "down": "d"}
 
 
@@ -47,10 +43,6 @@ def get_window_bounds(w):
     ww, wh = w["size"][0], w["size"][1]
     return {"left": x, "right": x+ww, "top": y, "bottom": y+wh,
             "center_x": x+ww//2, "center_y": y+wh//2}
-
-
-def is_protected(w):
-    return any(app in w.get("class", "").lower() for app in PROTECTED_APPS)
 
 
 def overlap_h(b1, b2):
@@ -126,8 +118,7 @@ def pan_to_window(floating, target_addr, center_x, center_y):
 
     batch_async(exprs)
 
-    if not is_protected(target):
-        focus_window(target_addr)
+    focus_window(target_addr)
 
 
 def main():
@@ -170,7 +161,6 @@ def main():
             key=lambda w: (
                 ((get_window_center(w)[0] - center_x)**2 +
                  (get_window_center(w)[1] - center_y)**2) ** 0.5
-                + (1000 if is_protected(w) else 0)
             )
         )
         pan_to_window(floating, closest["address"], center_x, center_y)

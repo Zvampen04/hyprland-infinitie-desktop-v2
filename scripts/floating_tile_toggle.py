@@ -19,8 +19,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hypr_ipc import (hyprctl_json, toggle_floating_lua, move_window_exact_lua,
                        resize_window_exact_lua, batch)
 
-LOCK_FILE  = "/tmp/floating_tile_toggle.lock"
-STATE_FILE = "/tmp/floating_tile_state.json"
+RUNTIME_DIR = os.environ.get("INFINITE_DESKTOP_RUNTIME_DIR",
+                             os.path.join(os.environ["XDG_RUNTIME_DIR"], "hyprland-infinite-desktop"))
+os.makedirs(RUNTIME_DIR, mode=0o700, exist_ok=True)
+LOCK_FILE = os.path.join(RUNTIME_DIR, "floating-tile-toggle.lock")
+STATE_FILE = os.path.join(RUNTIME_DIR, "floating-tile-state.json")
 
 
 # ──────────────────────────────────────────────
